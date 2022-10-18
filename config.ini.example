@@ -1,0 +1,11 @@
+[databridge]
+host = some_host
+user = some_user
+database = some_database
+password = some_password
+
+[betabridge]
+host = some_host
+user = some_user
+database = some_database
+password = some_password
