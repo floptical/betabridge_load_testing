@@ -2,6 +2,8 @@ import psycopg2
 import time
 import random
 import os,sys
+import threading
+from datetime import datetime
 from configparser import ConfigParser
 
 script_directory = os.path.dirname(os.path.realpath(__file__))
@@ -21,6 +23,19 @@ conn.autocommit = True
 cur = conn.cursor()
 # Timeout at 9 seconds
 cur.execute("SET SESSION statement_timeout = '9000'")
+
+
+def wait_until_9th_second():
+    '''Wait until the 9th second of every 10 seconds'''
+    while True:
+        now = datetime.now()
+        if (now.second % 10) != 0:
+            x = (now.second % 10) % 9
+            if x == 0:
+                print(now.strftime("%H:%M:%S"))
+                return
+            else:
+                time.sleep(0.95)
 
 
 def random_select(table, amount=5000):
@@ -43,16 +58,26 @@ def random_select(table, amount=5000):
 
     end = time.time() - start
     end = '%7f'%(end)
-    print(f'Duration: {end}')
+    print(f'Duration: {end}, results: {len(results)}')
     return end
 
 def intersect_select(table):
+    tsplit = table.split('.')
+    stmt = f"SELECT Find_SRID('{tsplit[0]}', '{tsplit[1]}', 'shape')"
+    cur.execute(stmt)
+    srid = cur.fetchone()[0]
+
+    source_shapes_tbl = f'citygeo.loadtest_polygons2_{str(srid)}'
+
     print(f'\nRunning random intersect select on {table}')
-    # I made 19 polygons in the citygeo.loadtest_polygons table, randomly select them.
-    random_oid = random.randrange(1,20)
+
+    # I made 1382 polygons in the citygeo.loadtest_polygons2 table, randomly select them.
+    #random_oid = random.randrange(1,1382+1)
+    # 1321 is the small squares only, the rest are larger. Use smaller to be more consistent for now.
+    random_oid = random.randrange(1,1321+1)
     stmt = f'''
     SELECT pt.* FROM {table} pt
-        JOIN citygeo.loadtest_polygons py
+        JOIN {source_shapes_tbl} py
         ON ST_Intersects(py.shape, pt.shape)
         WHERE py.objectid = {random_oid};
     '''
@@ -61,7 +86,7 @@ def intersect_select(table):
     results = cur.fetchall()
     end = time.time() - start
     end = '%7f'%(end)
-    print(f'Duration: {end}')
+    print(f'Duration: {end}, results: {len(results)}')
     return end
 
 
@@ -141,14 +166,14 @@ address_summary_intersect_latency_seconds {address_summary_intersect_dur}
 # TYPE rtt_summary_intersect_latency_seconds gauge
 rtt_summary_intersect_latency_seconds {rtt_summary_intersect_dur}
     '''
+
+    print('Waiting until 9th second...')
+    wait_until_9th_second()
+
     html_file = open('/var/www/html/latency-exporter.html', 'w')
     html_file.write(export_txt)
     html_file.close()
     loop_end = time.time() - loop_start
-    sleep_time = 9 - loop_end
-    # Attempt to loop every 9 seconds
-    if sleep_time > 0:
-        print(f'sleeping {sleep_time}')
-        time.sleep(sleep_time)
+
 print('Done.')
 

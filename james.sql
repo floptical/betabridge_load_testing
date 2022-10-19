@@ -49,4 +49,4 @@ from (
 		end as additions_group
 	from list) as a
 group by a.additions_group;
-\q
+--\q
