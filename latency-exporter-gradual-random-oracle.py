@@ -18,8 +18,11 @@ user = conn_info['user']
 database = conn_info['database']
 password = conn_info['password']
 
-dsn = cx_Oracle.makedsn(host, 1521, database)
-conn = cx_Oracle.connect(user, password, dsn, encoding="UTF-8")
+conn_string = f'{user}/{password}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT=1521))(CONNECT_DATA=(SERVICE_NAME={database})))'
+
+conn = cx_Oracle.connect(conn_string)
+
+# 19 seconds timeout
 conn.call_timeout = 19000
 
 conn.autocommit = True
@@ -91,13 +94,13 @@ def make_table_list():
             #  ORA-00932: inconsistent datatypes: expected - got CLOB
             elif 'ORA-00932' in str(e):
                 continue
+            elif 'ORA-22901: cannot compare VARRAY or LOB attributes of an object type' in str(e):
+                continue
             else:
                 raise e
 
 make_table_list()
 print(tables_and_srids)
-raise
-
 
 def wait_until_9th_second():
     '''Wait until the 9th second of every 10 seconds'''
@@ -128,7 +131,8 @@ def intersect_select(table,srid):
     try:
         # Running queries async on a single connection seems to give us bad results, so make one conn/cur per async run.
         dsn = cx_Oracle.makedsn(host, 1521, database)
-        async_conn = cx_Oracle.connect(user, password, dsn, encoding="UTF-8")
+
+        async_conn = cx_Oracle.connect(conn_string)
         async_conn.call_timeout = 19000
 
         async_conn.autocommit = True
@@ -139,19 +143,19 @@ def intersect_select(table,srid):
         # 1321 is the small squares only, the rest are larger. Use smaller to be more consistent for now.
         random_oid = random.randrange(1,1321+1)
 
-        source_shapes_tbl = f'GIS_GSG.loadtest_polygons2_{str(srid)}'
+        source_shapes_tbl = f'GIS_TEST.loadtest_polygons2_{str(srid)}'
         # To make these differently projected tables from my initial one, run this in arcpy:
         # import arcpy
         # arcpy.env.workspace = 'C:\\Users\\roland.macdavid\\AppData\\Roaming\\Esri\\Desktop10.8\\ArcCatalog\\betabridge-staging_citygeo.sde'
         # arcpy.Project_management(in_dataset='citygeo.loadtest_polygons2_2272', out_dataset='loadtest_polygons2_6565', out_coor_system=6565)
 
         stmt = f'''
-        SELECT pt.* FROM {table} pt
-            JOIN {source_shapes_tbl} py
-            ON ST_Intersects(py.shape, pt.shape)
-            WHERE py.objectid = {random_oid}
-            AND pt.shape is NOT NULL;
+        SELECT pt.* FROM {table} pt, {source_shapes_tbl} py
+            WHERE sde.st_intersects(py.shape, pt.shape) = 1
+            AND py.objectid = {random_oid}
+            AND pt.shape is NOT NULL
         '''
+
         start = time.time()
         async_cur.execute(stmt)
         results = async_cur.fetchall()
@@ -164,6 +168,8 @@ def intersect_select(table,srid):
         async_conn.close()
         return end
     except Exception as e:
+        if "ORA-" in str(e):
+            print(stmt)
         async_conn.close()
         print(str(e))
         return str(e)
@@ -211,7 +217,7 @@ random_intersect_gradual_latency_oracle{{amount="{i}"}} {loop_end}'''
     html_file = open('/var/www/html/latency-exporter.html', 'w')
     html_file.write(export_txt)
     html_file.close()
-    #time.sleep(1)
+    time.sleep(1)
 
 print('Done.')
 
