@@ -174,7 +174,7 @@ random_intersect_gradual_latency{{amount="{i}"}} {loop_end}'''
     html_file = open('/var/www/html/latency-exporter.html', 'w')
     html_file.write(export_txt)
     html_file.close()
-    #time.sleep(1)
+    time.sleep(1)
 
 print('Done.')
 
