@@ -1,13 +1,14 @@
 import psycopg2
 import time
 import random
-
+import os,sys
 from configparser import ConfigParser
 
+script_directory = os.path.dirname(os.path.realpath(__file__))
 
 config = ConfigParser()
 config.read(script_directory + os.sep + 'config.ini')
-conn_info = dict(config.items('databridge'))
+conn_info = dict(config.items('betabridge'))
 
 host = conn_info['host']
 user = conn_info['user']

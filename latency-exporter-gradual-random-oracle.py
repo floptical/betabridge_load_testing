@@ -5,7 +5,9 @@ import random
 import threading
 from datetime import datetime
 from configparser import ConfigParser
+import os,sys
 
+script_directory = os.path.dirname(os.path.realpath(__file__))
 
 config = ConfigParser()
 config.read(script_directory + os.sep + 'config.ini')
