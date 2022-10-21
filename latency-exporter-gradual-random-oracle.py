@@ -22,8 +22,8 @@ conn_string = f'{user}/{password}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={hos
 
 conn = cx_Oracle.connect(conn_string)
 
-# 19 seconds timeout
-conn.call_timeout = 19000
+# 18 seconds timeout
+conn.call_timeout = 18000
 
 conn.autocommit = True
 cur = conn.cursor()
@@ -89,12 +89,15 @@ def make_table_list():
         except Exception as e:
             # wierd timezone error that only occurs on some datasets
             if 'ORA-01805' in str(e):
+                print(f'{table} error: {str(e)}')
                 continue
             # Why am I getting this on a select distinct statement?
             #  ORA-00932: inconsistent datatypes: expected - got CLOB
             elif 'ORA-00932' in str(e):
+                print(f'{table} error: {str(e)}')
                 continue
             elif 'ORA-22901: cannot compare VARRAY or LOB attributes of an object type' in str(e):
+                print(f'{table} error: {str(e)}')
                 continue
             else:
                 raise e
@@ -168,20 +171,72 @@ def intersect_select(table,srid):
         async_conn.close()
         return end
     except Exception as e:
-        if "ORA-" in str(e):
+        if 'ORA-01013: user requested cancel' in str(e):
+            raise e
+        elif "DPI-1067: call timeout" in str(e):
+            print(f'Query for {table} timed out at 18 seconds.')
+            return
+        elif 'DPI-1080: connection was closed by ORA-3136':
+            print(f'Query for {table} timed out at 18 seconds.')
+            return
+        elif "ORA-" in str(e):
             print(stmt)
         async_conn.close()
         print(str(e))
         return str(e)
 
 
-count = 1
-for i in range(999):
-    print(f'\nLoop #{i}')
-    #intersect_select(random_table)
+def gradual_increase():
+    count = 1
+    for i in range(999):
+        print(f'\nLoop #{i}')
+        #intersect_select(random_table)
+        thread_dict = {}
+        loop_start = time.time()
+        for i in range(0,count):
+            # Get a random table
+            random_table_index = random.randrange(0, len(tables_and_srids)-1)
+            z = tables_and_srids[random_table_index]
+
+            rand_table = z[0]
+            srid = z[1]
+
+            #thread_dict[i] = threading.Thread(target=intersect_select)
+            thread_dict[i] = threading.Thread(target=intersect_select, args=(rand_table,srid,))
+            thread_dict[i].start()
+
+        for key in thread_dict.keys():
+            thread_dict[key].join()
+            # no worky VV
+            #return_value = thread_dict[key].result
+            #print(f'{key} return value: {return_value}')
+
+        loop_end = time.time() - loop_start
+        print(f'Loop duration: {loop_end}')
+        count += 1
+        thread_dict = {}
+        # Can't indent this how I want because there can't be any whitespace starting the lines
+        export_txt = f'''# HELP random_intersect_gradual_latency_oracle Latency for this query
+    # TYPE random_intersect_gradual_latency_oracle gauge
+    random_intersect_gradual_latency_oracle{{amount="{i}"}} {loop_end}'''
+        #print(export_txt)
+
+        # Wait until every 9/10 seconds in a minute (9, 19, 29, etc)
+        # so we can align with the prometheus scraper exactly.
+        # Actually wait every 20th second until we write
+        every_20th_second()
+
+        html_file = open('/var/www/html/latency-exporter.html', 'w')
+        html_file.write(export_txt)
+        html_file.close()
+        time.sleep(1)
+
+
+def run_concurrent_amount(amount):
     thread_dict = {}
     loop_start = time.time()
-    for i in range(0,count):
+
+    for i in range(0,amount+1):
         # Get a random table
         random_table_index = random.randrange(0, len(tables_and_srids)-1)
         z = tables_and_srids[random_table_index]
@@ -191,33 +246,26 @@ for i in range(999):
 
         #thread_dict[i] = threading.Thread(target=intersect_select)
         thread_dict[i] = threading.Thread(target=intersect_select, args=(rand_table,srid,))
-        thread_dict[i].start()
+
+    for key in thread_dict.keys():
+        thread_dict[key].start()
 
     for key in thread_dict.keys():
         thread_dict[key].join()
-        # no worky VV
-        #return_value = thread_dict[key].result
-        #print(f'{key} return value: {return_value}')
 
     loop_end = time.time() - loop_start
     print(f'Loop duration: {loop_end}')
-    count += 1
     thread_dict = {}
-    # Can't indent this how I want because there can't be any whitespace starting the lines
-    export_txt = f'''# HELP random_intersect_gradual_latency_oracle Latency for this query
-# TYPE random_intersect_gradual_latency_oracle gauge
-random_intersect_gradual_latency_oracle{{amount="{i}"}} {loop_end}'''
-    #print(export_txt)
 
-    # Wait until every 9/10 seconds in a minute (9, 19, 29, etc)
-    # so we can align with the prometheus scraper exactly.
-    # Actually wait every 20th second until we write
-    every_20th_second()
 
-    html_file = open('/var/www/html/latency-exporter.html', 'w')
-    html_file.write(export_txt)
-    html_file.close()
-    time.sleep(1)
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        amount = int(sys.argv[1])
+        print(amount)
+        run_concurrent_amount(amount)
+    else:
+        gradual_increase()
+
 
 print('Done.')
 
